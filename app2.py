@@ -19,6 +19,15 @@ from torchvision.transforms import v2 as T
 import numpy as np
 from io import StringIO
 
+import gdown
+import os
+
+# Revisamos si el dispositivo tiene el modelo y se descargar en caso contrario
+if not os.path.exists('model_scripted2.pb'):
+    id = "139NpHnMTQj5OcSRxMvJ7fPjOhaRSsbAg"
+    gdown.download(id=id, output='model_scripted2.pb')
+
+
 # Configuración del modelo
 if torch.cuda.is_available():
     model = torch.load('model_scripted2.pb')
@@ -27,6 +36,7 @@ else:
     model = torch.load('model_scripted2.pb', map_location=torch.device('cpu'))
     device = torch.device('cpu')
 
+# Denifir en modo de evaluacion
 model.eval()
 
 
@@ -45,6 +55,7 @@ eval_transform = get_transform(train=False)
 
 
 class DetectedObject:
+    '''Clase para el guardado de variables del objeto identificado'''
     def __init__(self, label, box):
         self.label = label
         self.box = box
@@ -52,20 +63,22 @@ class DetectedObject:
 
 
 class Data:
+    '''Clase para facil comunicacion de variables entre callbacks'''
     def __init__(self):
         self.img = None
         self.lat = None
         self.lng = None
         self.detected_objects = []
 
-
+# Inicio de objeto global
 Gdata = Data()
 
+# Definicion de colores en espanol y color de grafico
 color_options = {'Negro': 'grey', 'Blanco': 'white', 'Rojo': 'red', 'Azul': 'blue',
                  'Amarillo': 'yellow', 'Verde': 'green', 'Otros': 'purple'}
 
 
-## Definir estilor:
+## Definir estilos:
 
 SIDEBAR_STYLE = {
     "position": "fixed",
@@ -102,6 +115,7 @@ custom_styles = {
         'margin': 'auto'
     },
     'body-text': {
+        'text-align':'justify',
         'font-size': '22px'  # Aumenta el tamaño de texto base
     },
     'section-title': {
@@ -115,8 +129,11 @@ custom_styles = {
 }
 
 def create_color_guide():
+    '''Funcion de ayuda para generar la guia de color'''
+    # Figura vacia
     fig = go.Figure()
-
+    
+    # Graficamos cada barra de color referencial
     for i, (name, color) in enumerate(color_options.items()):
         fig.add_trace(go.Bar(
             x=[name],
@@ -128,7 +145,7 @@ def create_color_guide():
             insidetextanchor='middle',
             hoverinfo='none'
         ))
-
+    # Actualizamos la figura
     fig.update_layout(
         title={
             'text': 'Guía de Clasificación por Color',
@@ -149,6 +166,7 @@ def create_color_guide():
 
     return fig
 
+# Creamos tarjeta de presentacion de los codigos de color
 color_guide = dbc.Card([
     dbc.CardHeader(html.H4("Guía de Clasificación por Color", className="text-center")),
     dbc.CardBody([
@@ -181,7 +199,7 @@ server = app.server
 # Barra lateral actualizada
 sidebar = html.Div(
     [
-        html.H2("MicroFinder", className="display-4"),
+        html.H4("MicroFinder", className="display-4"),
         html.Hr(),
         html.P(
             "Detecta Microplásticos fácil y rápido", className="lead"
@@ -209,6 +227,7 @@ app.layout = html.Div([
     content
 ])
 
+# Definicion de paginas
 landing_page = html.Div([
     # Sección Hero
     dbc.Container([
@@ -310,7 +329,8 @@ detector_page = html.Div([
                     dbc.Spinner(children=html.Div(id='spinner-1'), color='primary', type="grow"),
                     dbc.Row([
                         dbc.Col(dcc.Dropdown(id='spinner-2', placeholder="Selecciona un objeto"), md=6),
-                        dbc.Col(dcc.Dropdown(id='spinner-3', placeholder="Selecciona un color"), md=6)
+                        dbc.Col(dcc.Dropdown(id='spinner-3', placeholder="Selecciona un color",
+                                            options=[{'label': color, 'value':color_options[color]} for color in color_options.keys()]), md=6)
                     ], className="mt-3"),
                 ])
             ], className="mb-4")
@@ -381,6 +401,7 @@ about_page = html.Div([
     ]),
 ])
 
+# Deorador para generacion de paginas correspondientes
 @app.callback(Output("page-content", "children"), [Input("url", "pathname")])
 def render_page_content(pathname):
     if pathname == "/":
@@ -401,12 +422,11 @@ def render_page_content(pathname):
     [Input("map", "center")]
 )
 def update_gps_info(center):
-    if center and center != [50, 10]:  # Asumiendo que [50, 10] es el centro por defecto
+    if center and center != [5, -72]:  # Asumiendo que [5, -72] es el centro por defecto
         return dbc.Alert(f"Coordenadas GPS detectadas: Latitud {center[0]:.6f}, Longitud {center[1]:.6f}", color="info")
     return ""
 
 ## Extracción de Metada de las imágenes:
-
 def get_decimal_coordinates(info):
     for key in ['Latitude', 'Longitude']:
         if 'GPS' + key in info and 'GPS' + key + 'Ref' in info:
@@ -459,13 +479,15 @@ def extract_gps_info(image_file):
 
     return None
 
+## Funciones para objetos
+# Extraccion de datos de prediccion y filtrado de la prediccion
 def process_predictions(predictions):
     pred = predictions[0]
     return [DetectedObject(f'Obj {n + 1}', box)
             for n, (label, box, score) in enumerate(zip(pred["labels"], pred['boxes'], pred['scores']))
             if score.item() > 0.09]
 
-
+# Funcion para grafica de identificadores de objetos
 def plot_image_with_boxes(image, detected_objects, selected_index=None):
     fig = go.Figure()
     img_width, img_height = image.size
@@ -487,7 +509,7 @@ def plot_image_with_boxes(image, detected_objects, selected_index=None):
             line_color = obj.classification
 
         opacity = 1 if is_selected else 0.7
-
+        # Crea la caja
         fig.add_shape(
             type="rect",
             x0=obj.box[0].item(),
@@ -497,7 +519,7 @@ def plot_image_with_boxes(image, detected_objects, selected_index=None):
             line=dict(color=line_color, width=line_width),
             opacity=opacity
         )
-
+        # Agrega el nombre
         fig.add_annotation(
             x=obj.box[0].item(),
             y=obj.box[1].item(),
@@ -540,6 +562,7 @@ def plot_image_with_boxes(image, detected_objects, selected_index=None):
 )
 def update_output(contents):
     if contents is not None:
+        # Procesado de documento a imagen
         content_type, content_string = contents.split(',')
         decoded = base64.b64decode(content_string)
         image = Image.open(io.BytesIO(decoded))
@@ -548,13 +571,17 @@ def update_output(contents):
         # Extraer información GPS
         gps_info = extract_gps_info(io.BytesIO(decoded))
 
+        # Transformacion de la imagen a tensor para el modelo
         imgTensor = pil_to_tensor(image)
         t = torch.tensor(np.array(imgTensor) / 255).float()
         t = eval_transform(t)
         t = t[:3, ...].to(device)
         predictions = model([t, ])
+        # Procesado de prediccion
         Gdata.detected_objects = process_predictions(predictions)
+        # Creacion de imagen y etiquetas
         fig = plot_image_with_boxes(image, Gdata.detected_objects, selected_index=0)
+        # Creacion de opciones para el menu interactivo de los objetos identificados
         object_options = [{'label': obj.label, 'value': i} for i, obj in enumerate(Gdata.detected_objects)]
 
         # Actualizar el centro del mapa si se encontró información GPS
@@ -566,6 +593,7 @@ def update_output(contents):
 
     return None, None, None, dash.no_update, dash.no_update
 
+# Actualizacion de la imagen con cambios seleccionados
 @app.callback(
     Output('image-graph', 'figure'),
     [Input('spinner-2', 'value'),
@@ -580,7 +608,7 @@ def update_classification(selected_object, selected_color):
         return fig
     return dash.no_update
 
-
+# Decorador para mostrar la imagen subida por el usuario
 @app.callback(Output('output-image-upload', 'children'),
               Input('upload-image', 'contents')
               )
@@ -589,7 +617,7 @@ def update_output_img(contents):
         return html.Img(src=contents, style={'width': 'auto', 'height': '50vh'})
     return None
 
-
+# Decorador para guardar coordenadas
 @app.callback(Output("coordinate-click-id", 'children'),
               [Input("map", 'clickData')])
 def click_coord(e):
@@ -600,7 +628,7 @@ def click_coord(e):
     else:
         return "-"
 
-
+# Decorador para generar histograma
 @app.callback(Output('hist', 'figure'),
               Output('intermediate-value', 'data'),
               Input('spinner-3', 'value'),
@@ -608,11 +636,13 @@ def click_coord(e):
 def show_plot(value):
     if not Gdata.detected_objects:
         raise PreventUpdate
+    # Carga de datos de color a forma tabular
     data = pd.DataFrame([{'color': obj.classification or 'Otros'} for obj in Gdata.detected_objects])
+    # Generacion de histograma y envio de datos para CSV
     fig = px.histogram(data, x='color')
     return fig, data['color'].value_counts().to_json(orient='index')
 
-
+# Decorador para descarga de CSV
 @app.callback(
     Output("download-csv", "data"),
     [Input("button_csv", "n_clicks"),
@@ -621,7 +651,9 @@ def show_plot(value):
 )
 def export_csv(n_clicks, data):
     if n_clicks > 0:
+        # Cargar datos del callback anterior
         df = pd.read_json(StringIO(data), orient='index')
+        # Definir nombres comodos
         df.columns = ['count']
         df.index.name = 'colors'
 
@@ -644,4 +676,6 @@ def export_csv(n_clicks, data):
 
 # Ejecutar la app
 if __name__ == '__main__':
-    app.run_server(debug=False)
+    port = os.environ.get('dash_port')
+    debug = os.environ.get('dash_debug') == 'True'
+    app.run_server(debug=debug, host='0.0.0.0', port=port)
